@@ -6,7 +6,7 @@ Lion Dance Motion Ink is a webcam experience for one, two, or three people drawi
 
 [Open on Vercel](https://every1isliondance.vercel.app) · [Original Site and keepsake backend](https://lion-dance-motion-ink.activepearl4.chatgpt.site)
 
-**Edition 05 / v2.5:** the red stage becomes the results view, the normal highlight starts playing, and a 3× timelapse and QR keepsake are prepared automatically. This edition targets the Vercel frontend; the original Site remains the existing Worker/R2 backend and retains its earlier frontend. Final v2.5 deployment and verification are pending.
+**Edition 06 / v2.6:** camera startup has a two-step lobby. The chosen number of distinct players must remain visible in clearly numbered lanes, then every player holds one thumb up to start the first countdown. Faces alone never start a game. The red-stage results, automatic highlight/timelapse and QR keepsakes from Edition 05 remain. This edition updates the Vercel frontend; the existing Worker/R2 keepsake backend remains unchanged.
 
 **Before starting:** Automatically make a QR keepsake at the end is checked by default. It uploads the finished poster and available videos to a public, unlisted link. Turn it off before starting to keep the media on this device. Camera processing stays local, and no microphone is recorded.
 
@@ -21,7 +21,7 @@ npm run build
 npm run preview
 ```
 
-Open **http://localhost:4173** in current Chrome or Edge. Review the automatic QR option, allow camera access and stand in your numbered lane. The first startup downloads MediaPipe JavaScript, WASM, and tracking models from CDNs. Timelapse conversion loads Mediabunny 1.61.3 from a pinned CDN. Warm the browser cache before an event; internet is still needed for uncached dependencies, fonts, and the QR library.
+Open **http://localhost:4173** in current Chrome or Edge. Review the automatic QR option, allow camera access and stand in your numbered lane. Wait for every player to be found, then hold one thumb up beside your face, fingers folded, for about 1.2 seconds. All players must be ready together; you can lower your hand once the countdown begins. The first startup downloads MediaPipe JavaScript, WASM, and tracking models from CDNs. Timelapse conversion loads Mediabunny 1.61.3 from a pinned CDN. Warm the browser cache before an event; internet is still needed for uncached dependencies, fonts, and the QR library.
 
 The local server runs the real compiled Worker with an **in-memory R2-compatible bucket**. Poster/video uploads, keepsake pages, byte-range video playback, and deletion work locally. Stored keepsakes disappear when the preview process stops. Localhost QR links open only on the same device; use the live demo for links that attendees can open on their phones.
 
@@ -49,6 +49,8 @@ The production frontend `https://every1isliondance.vercel.app` is registered wit
 
 - Draw simultaneously in one camera with up to three dancers. Costume sets are assigned randomly and stay with each dancer throughout the session.
 - Choose **福 喜 春 安 吉 顺**, or **吉祥如意 心想事成 万事如意 年年有余 岁岁平安 恭喜发财**. These phrases are common blessing greetings; they are not all formal 成语.
+- **Camera lobby:** the selected number of players must be recognized in separate numbered lanes for at least 1.25 seconds across four fresh observations. Each player then holds **one thumbs-up beside their own face** for about 1.2 seconds; both hands are unnecessary. Actual MediaPipe hand landmarks, its `Thumb_Up` classifier, a confidence threshold, folded-finger geometry and hand-to-person association are required. A face detection or raised wrist alone cannot start the game.
+- Leaving a lane during the **first** countdown returns everyone to the lobby and requires a new readiness gesture. After the first drawing begins, tracking pauses preserve the existing round time and marks. If the gesture model cannot load, the lobby stays blocked and offers Retry; a host can explicitly choose a **both hands above head** fallback held for about two seconds. It never switches automatically.
 - Watch the bright reference during a **3–2–1 countdown**, then move freely. Each round starts, seals, assembles, and advances automatically. The reference is a cue; there is no tracing score.
 - The timer finishes a dancer's mark after meaningful movement. Someone who has not moved gets another five seconds. Raise **both hands above your head for about one second** to finish early, or use the optional Seal button. Standing still does not finish a mark.
 - Pause and tracking loss preserve round time and pause recording. Close-up tracking uses the measured face; a wider view supports body movement. The cursor stays in the mirrored camera's coordinate space, with gentle smoothing and no movement amplification.
@@ -88,7 +90,10 @@ Camera frames and landmark processing stay in the browser. No microphone is reco
 | --- | --- |
 | `client/index.html` | Responsive page, styles, and script insertion points |
 | `client/app.js` | Session flow, adaptive timing, simultaneous lanes, ink, poster, and sharing UI |
-| `client/pose-worker.js` | MediaPipe pose and optional face tracking in a Worker |
+| `client/pose-worker.js` | MediaPipe pose, optional face tracking and lobby-only gesture inference in a Worker |
+| `client/player-lobby.js` | Pure distinct-player, lane ownership and observation freshness controller |
+| `client/camera-lobby.js` | Two-step camera startup, all-player gesture gate, UI and explicit failure fallback |
+| `client/readiness-gesture.js` | Pure hand geometry, ownership and fresh gesture-hold checks inside the Worker |
 | `client/cursor-smoothing.js` | Camera-coordinate ink smoothing |
 | `client/lion-filter.js` | Face-safe headgear and measured-body costume rendering |
 | `client/media.js` | Canvas recording, soundtrack mix, MP4 audio-clock repair, and deterministic source-timestamp timelapse export |
@@ -112,7 +117,7 @@ The repository also includes `index.html`, a standalone file with the costumes a
 
 For a complete independent backend deployment, provide a Worker-compatible runtime and a persistent R2 bucket bound as **`BUCKET`**. The repository has no deployment credentials or production project binding. Hosting only `dist/index.html` does not supply its asset routes or the keepsake backend. The provided Vercel configuration supplies a static frontend plus a proxy to the existing backend. Production storage lifetime and any cleanup policy belong to the backend deployment; the app does not promise automatic expiry.
 
-The browser loads MediaPipe Tasks Vision **0.10.32**, the Lite pose model, an optional face model, QRCode.js, Google Fonts, and timelapse-only **Mediabunny 1.61.3** externally. Timelapse requires working browser VideoDecoder, VideoEncoder and AudioEncoder support for the selected codecs; unsupported browsers keep the normal download. If camera/model startup fails, **Try free ink with a cursor** works without camera tracking. **Preview** is a labelled automated demonstration using sample strokes and procedural lions, not footage of participants.
+The browser loads MediaPipe Tasks Vision **0.10.32**, the Lite pose model, an optional face model, the canned Gesture Recognizer model for startup, QRCode.js, Google Fonts, and timelapse-only **Mediabunny 1.61.3** externally. Timelapse requires working browser VideoDecoder, VideoEncoder and AudioEncoder support for the selected codecs; unsupported browsers keep the normal download. If camera/model startup fails, **Try free ink with a cursor** works without camera tracking. **Preview** is a labelled automated demonstration using sample strokes and procedural lions, not footage of participants.
 
 ## Credits and retained notices
 
@@ -124,6 +129,6 @@ The soundtrack excerpt was supplied by the project creator. This repository pres
 
 See [`THIRD_PARTY.md`](THIRD_PARTY.md) for dependency and media provenance.
 
-Edition 05 changes the frontend and browser media implementation beyond published Sites version 7. This edition targets Vercel only; the existing Sites Worker/R2 backend remains in use. Final deployment and media/sharing checks are pending.
+Edition 06 adds startup gating beyond Edition 05 and published Sites version 7. This edition targets Vercel only; the existing Sites Worker/R2 backend remains in use. Browser and model checks distinguish synthetic startup fixtures from physical participant rehearsal.
 
 Made for Common Ground. A playful contemporary interpretation of southern lion dance and the joy of making together.

@@ -2,12 +2,124 @@
 const VERSION = '0.10.32';
 const ROOT = `https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${VERSION}`;
 const MODEL = 'https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task';
+const GESTURE_MODEL = 'https://storage.googleapis.com/mediapipe-models/gesture_recognizer/gesture_recognizer/float16/1/gesture_recognizer.task';
 const FACE_MODEL = 'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task';
 let models = [], delegates = [], lanes = 2, busy = false;
 let vision, files, modelBytes, renderer = '', inputHeight = 320, averageMs = 0, frameCount = 0;
 const buffers = [], contexts = [], stamps = [];
 let faceModel, faceBuffer, faceContext, faceStamp = 0, faceLoading = false;
 const poseAttemptAt = [], poseDetected = [], previousFaces = [];
+let gestureModel, gestureBytes, gestureFetch, gestureCanvas, gestureContext;
+let gestureState='idle', gestureGeneration=0, gestureSampleAt=-Infinity;
+let readinessEnabled=false, readinessPreload=false, readinessEpoch=0, readinessHold, readinessResults=null;
+
+function resetReadiness() {
+  readinessHold = new ReadinessGesture.Hold(lanes);
+  readinessHold.reset(readinessEpoch);
+  readinessResults = null; gestureSampleAt = -Infinity;
+}
+function gestureFailure(message) {
+  gestureState = 'unavailable'; resetReadiness();
+  self.postMessage({ type:'gestureUnavailable', message, readinessEpoch });
+}
+async function loadGesture(retry = false) {
+  if (!vision || !files || (!retry && (gestureModel || gestureState === 'loading' || gestureState === 'unavailable'))) return;
+  const generation = ++gestureGeneration;
+  gestureFetch?.abort();
+  if (retry) { try { gestureModel?.close(); } catch (_) {} gestureModel = null; }
+  gestureState = 'loading';
+  self.postMessage({ type:'gestureLoading', readinessEpoch });
+  const controller = gestureFetch = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 15000);
+  let created;
+  try {
+    if (!gestureBytes) {
+      const response = await fetch(GESTURE_MODEL, { signal: controller.signal });
+      if (!response.ok) throw new Error(`Hand gesture model download failed (${response.status}).`);
+      const bytes = new Uint8Array(await response.arrayBuffer());
+      if (generation !== gestureGeneration) return;
+      gestureBytes = bytes;
+    }
+    clearTimeout(timer);
+    let creationTimer;
+    const task = vision.GestureRecognizer.createFromOptions(files, {
+      baseOptions:{modelAssetBuffer:gestureBytes.slice(),delegate:'CPU'},
+      runningMode:'IMAGE',numHands:2,
+      minHandDetectionConfidence:.55,minHandPresenceConfidence:.55,minTrackingConfidence:.5,
+      cannedGesturesClassifierOptions:{maxResults:1,scoreThreshold:0}
+    });
+    try {
+      created = await Promise.race([task,new Promise((_,reject)=>{creationTimer=setTimeout(()=>reject(new Error('Hand gesture model setup timed out.')),10000);})]);
+    } catch(error) {
+      // A late native setup must not revive a failed/retried readiness attempt.
+      task.then(model=>{try{model.close();}catch(_){}}).catch(()=>{}); throw error;
+    } finally { clearTimeout(creationTimer); }
+    if (generation !== gestureGeneration) { created.close(); return; }
+    gestureModel = created; gestureState = 'ready'; resetReadiness();
+    self.postMessage({ type:'gestureReady', readinessEpoch, model:'Thumb_Up', confidence:.8, holdMs:1200 });
+  } catch(error) {
+    if (generation === gestureGeneration) gestureFailure(error.name === 'AbortError' ? 'Hand gesture model download timed out. Retry when your connection is ready.' : error.message);
+  } finally { clearTimeout(timer); if (gestureFetch === controller) gestureFetch = null; }
+}
+function setReadiness(data) {
+  const epoch = Number.isSafeInteger(data.epoch) ? data.epoch : readinessEpoch;
+  const enabled = !!data.enabled;
+  if (epoch !== readinessEpoch || enabled !== readinessEnabled || data.retry) {
+    readinessEpoch = epoch; readinessEnabled = enabled; resetReadiness();
+  }
+  readinessEnabled = enabled; readinessPreload = !!data.preload || enabled;
+  if (readinessPreload) void loadGesture(!!data.retry);
+  self.postMessage({ type:'gestureState', state:gestureState, enabled:readinessEnabled, readinessEpoch });
+}
+function readinessCrop(bitmap, ref) {
+  const head = ref.anchor, laneWidth = bitmap.width / lanes;
+  const topLimit = Math.max(0,head.y-Math.max(.14,head.headHeight*1.2));
+  const bottomLimit = Math.min(1,head.y+Math.min(.5,Math.max(.28,head.headHeight*3.5)));
+  const wrists = [ref.pose?.[15],ref.pose?.[16]].filter(p => p && (p.visibility??1)>=.6 && (p.presence??1)>=.6 && ReadinessGesture.inLane(p,ref.lane,lanes) && p.y>topLimit && p.y<bottomLimit);
+  let top = Math.max(0,head.y-head.headHeight*.8), bottom = Math.min(1,head.y+head.headHeight*2.5);
+  for (const wrist of wrists) { top=Math.min(top,wrist.y-head.headHeight);bottom=Math.max(bottom,wrist.y+head.headHeight*.8); }
+  top=Math.max(topLimit,top);bottom=Math.min(bottomLimit,Math.max(bottom,top+.15));
+  const x=ref.lane*laneWidth,y=Math.max(0,top*bitmap.height),width=laneWidth,height=Math.min(bitmap.height-y,(bottom-top)*bitmap.height);
+  return {x,y,width,height};
+}
+function detectReadiness(bitmap,data,refs) {
+  if (!readinessEnabled || !gestureModel || gestureState !== 'ready') return {results:null,ms:0};
+  const time=Number(data.time),aspect=bitmap.width/bitmap.height;
+  const frameAge=Number.isFinite(data.captureEpoch)?Date.now()-data.captureEpoch:0;
+  if (!Number.isFinite(time) || frameAge>650 || frameAge < -100) {
+    resetReadiness();
+    return {results:refs.map(()=>({thumbsUp:false,ready:false,progress:0,heldMs:0,score:0,reason:'stale-frame',capturedAt:time,sampledAt:time})),ms:0};
+  }
+  // Cached observations retain the actual hand sampling time. Losing a person
+  // invalidates that lane immediately, without waiting for the next hand scan.
+  for(let i=0;i<lanes;i++) {
+    const prior=readinessHold.states[i],ref=refs[i];
+    if(!ref.seen||!ref.distinct||prior&&ReadinessGesture.distance(prior.anchor,ref.anchor,aspect)>Math.max(.12,ref.anchor.headWidth*aspect*1.5)){
+      readinessHold.states[i]=null;
+      if(readinessResults)readinessResults[i]={thumbsUp:false,ready:false,progress:0,heldMs:0,score:0,reason:ref.reason,capturedAt:time,sampledAt:time};
+    }
+  }
+  if(time-gestureSampleAt<220)return{results:readinessResults,ms:0};
+  const start=performance.now(),hands=[];
+  for(const ref of refs) {
+    if(!ref.seen||!ref.distinct)continue;
+    const crop=readinessCrop(bitmap,ref),scale=Math.min(1,480/crop.height,640/crop.width);
+    const width=Math.max(2,Math.round(crop.width*scale)),height=Math.max(2,Math.round(crop.height*scale));
+    if(!gestureCanvas){gestureCanvas=new OffscreenCanvas(width,height);gestureContext=gestureCanvas.getContext('2d',{alpha:false,desynchronized:true});}
+    if(gestureCanvas.width!==width)gestureCanvas.width=width;if(gestureCanvas.height!==height)gestureCanvas.height=height;
+    gestureContext.drawImage(bitmap,crop.x,crop.y,crop.width,crop.height,0,0,width,height);
+    // IMAGE mode intentionally has no temporal hand state shared across people.
+    const result=gestureModel.recognize(gestureCanvas);
+    for(let i=0;i<(result.landmarks?.length||0);i++){
+      const category=result.gestures?.[i]?.[0];
+      const landmarks=result.landmarks[i].map(p=>({...p,x:(crop.x+p.x*crop.width)/bitmap.width,y:(crop.y+p.y*crop.height)/bitmap.height,z:p.z*crop.width/bitmap.width}));
+      hands.push({lane:ref.lane,label:category?.categoryName,score:category?.score,landmarks,worldLandmarks:result.worldLandmarks?.[i]});
+    }
+  }
+  gestureSampleAt=time;
+  readinessResults=readinessHold.update(ReadinessGesture.observations(hands,refs,aspect),refs,time,readinessEpoch,aspect);
+  return{results:readinessResults,ms:performance.now()-start};
+}
 
 function chooseDelegate(requested) {
   if (requested === 'CPU') return 'CPU';
@@ -121,6 +233,9 @@ async function initialize(data) {
   poseAttemptAt.length = 0; poseDetected.length = 0; previousFaces.length = 0;
   try { faceModel?.close(); } catch (_) {}
   faceModel = null; faceStamp = 0;
+  ++gestureGeneration; gestureFetch?.abort();
+  try { gestureModel?.close(); } catch (_) {}
+  gestureModel=null;gestureState='idle';resetReadiness();
   const delegate = chooseDelegate(data.delegate);
   inputHeight = delegate === 'GPU' ? 384 : lanes === 3 ? 288 : 320;
   vision = await import(`${ROOT}/vision_bundle.mjs`);
@@ -145,6 +260,7 @@ async function initialize(data) {
   // Load refinement in the background so a weak venue connection cannot delay
   // normal full-body tracking or prevent the camera from starting.
   void makeFaceModel();
+  if(readinessPreload)void loadGesture();
 }
 
 async function processFrame(data) {
@@ -205,8 +321,16 @@ async function processFrame(data) {
       self.postMessage({ type: 'faceUnavailable', message: error.message });
     }
     for (let i = 0; i < lanes; i++) previousFaces[i] = !!faceResult.faces[i];
+    const trackingMs = performance.now() - start;
+    let refs=null,gestureResult={results:null,ms:0};
+    if(readinessPreload||readinessEnabled){
+      refs=ReadinessGesture.players(poses,faceResult.faces,lanes,bitmap.width/bitmap.height,time);
+      try{gestureResult=detectReadiness(bitmap,data,refs);}catch(error){
+        try{gestureModel?.close();}catch(_){}gestureModel=null;gestureFailure(error.message);
+      }
+    }
     const ms = performance.now() - start;
-    averageMs = averageMs ? averageMs * .8 + ms * .2 : ms;
+    averageMs = averageMs ? averageMs * .8 + trackingMs * .2 : trackingMs;
     // The tensor size is fixed; smaller input chiefly saves upload/preprocessing.
     // Resize infrequently to avoid reallocating a texture every frame.
     if (++frameCount > 2 && frameCount % 8 === 0) {
@@ -214,6 +338,9 @@ async function processFrame(data) {
       else if (averageMs < 35) inputHeight = Math.min(384, inputHeight + 32);
     }
     self.postMessage({
+      readiness:gestureResult.results?gestureResult.results.slice().reverse():null,readinessEpoch,
+      readinessEnabled,gestureState,gestureMs:gestureResult.ms,
+      lobbyPresence:refs?refs.map(({seen,distinct,reason,capturedAt,anchor})=>({seen,distinct,reason,capturedAt,anchor})).reverse():null,
       type: 'poses', poses: poses.reverse(), faces: faceResult.faces.reverse(), time, ms,
       faceMs: faceResult.ms, faceReady: !!faceModel, faceLoading,
       poseAttempts, poseSkipped,
@@ -223,6 +350,7 @@ async function processFrame(data) {
     });
   } catch (error) {
     previousFaces.fill(false);
+    if(readinessEnabled)resetReadiness();
     self.postMessage({ type: 'frameError', message: error.message, time });
   } finally { busy = false; bitmap.close(); }
 }
@@ -231,5 +359,6 @@ self.onmessage = async ({ data }) => {
   if (data.type === 'init') {
     try { await initialize(data); }
     catch (error) { self.postMessage({ type: 'error', message: error.message }); }
-  } else if (data.type === 'frame') await processFrame(data);
+  } else if(data.type==='readiness')setReadiness(data);
+  else if (data.type === 'frame') await processFrame(data);
 };
