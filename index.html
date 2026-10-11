@@ -1381,7 +1381,10 @@ window.LION_ASSETS={"sets":[{"id":"red","head":"data:image/webp;base64,UklGRjbnB
           this.hit(1.15, true);
           await this._delay(2000);
           if (!this._valid(token)) return null;
-          await this._endRound(token);
+          if (!await this._endRound(token)) {
+            if (this._valid(token)) this._cleanupSession();
+            return null;
+          }
           if (!this._valid(token)) return null;
           const recorder = this._recorder;
           if (!recorder) {
@@ -1390,7 +1393,8 @@ window.LION_ASSETS={"sets":[{"id":"red","head":"data:image/webp;base64,UklGRjbnB
             return null;
           }
           await this._waitEvent(recorder, 'stop', () => recorder.stop(), 5000);
-          if (!this._valid(token) || this._sessionError) return null;
+          if (!this._valid(token)) return null;
+          if (this._sessionError) throw this._sessionError;
           const mime = recorder.mimeType || this._chunks[0]?.type || 'video/webm';
           let blob = new Blob(this._chunks, { type: mime });
           if (mime.includes('mp4')) {
