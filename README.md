@@ -6,7 +6,7 @@ Lion Dance Motion Ink is a webcam experience for one, two, or three people drawi
 
 [Open on Vercel](https://every1isliondance.vercel.app) · [Original Site and keepsake backend](https://lion-dance-motion-ink.activepearl4.chatgpt.site)
 
-**Edition 06 / v2.6:** camera startup has a two-step lobby. The chosen number of distinct players must remain visible in clearly numbered lanes, then every player holds one thumb up to start the first countdown. Faces alone never start a game. The red-stage results, automatic highlight/timelapse and QR keepsakes from Edition 05 remain. This edition updates the Vercel frontend; the existing Worker/R2 keepsake backend remains unchanged.
+**Edition 06 / v2.6:** camera startup has a two-step lobby. The chosen number of distinct players must remain visible in clearly numbered lanes, then every player holds one thumb up to start the first countdown. Faces alone never start a game. A newly generated cute southern-lion favicon matches the crimson, ivory and gold palette. The red-stage results, automatic highlight/timelapse and QR keepsakes from Edition 05 remain. This edition updates the Vercel frontend; the existing Worker/R2 keepsake backend remains unchanged.
 
 **Before starting:** Automatically make a QR keepsake at the end is checked by default. It uploads the finished poster and available videos to a public, unlisted link. Turn it off before starting to keep the media on this device. Camera processing stays local, and no microphone is recorded.
 
@@ -99,7 +99,7 @@ Camera frames and landmark processing stay in the browser. No microphone is reco
 | `client/media.js` | Canvas recording, soundtrack mix, MP4 audio-clock repair, and deterministic source-timestamp timelapse export |
 | `client/glyph-library.js` | Curated reference geometry, movement groups, and blessing catalogue |
 | `client/base.js` | Canvas utilities and retained glyph attribution |
-| `client/assets/` | Original generated costume PNGs, optimized WebPs, prompts, and design references |
+| `client/assets/` | Original generated costume PNGs, optimized WebPs, prompts, design references, and generated favicon variants |
 | `soundtrack.mp3` | The energetic 67.6–105.6-second excerpt of the supplied lion-dance recording |
 | `worker/api.js` | Keepsake upload, validation, range requests, and deletion |
 | `scripts/build-v2.mjs` | Validates scripts and embeds client, audio, and WebP assets into the Worker |

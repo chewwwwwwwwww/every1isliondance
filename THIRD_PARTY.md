@@ -30,6 +30,10 @@ The six costume source PNGs and their optimized WebPs were generated for this pr
 
 The three sets are inspired by red/ivory Fut San, jade/ivory Hok San, and gold/black Fut San forms. The app's separate headgear and fitted clothing are an adaptation; a traditional southern lion also has the connecting body/cape.
 
+## Favicon
+
+The cute southern-lion favicon was newly generated for this project with the built-in imagegen tool on 2026-10-11. Transparent PNG and ICO variants retain the generated artwork and alpha. [`client/assets/favicon/PROMPT.md`](client/assets/favicon/PROMPT.md) preserves the prompt and generation provenance. No external reference image is bundled.
+
 ## Soundtrack
 
 `soundtrack.mp3` contains the energetic 67.6–105.6-second excerpt of `Lion Dance.mp3` supplied by the project creator for the demo. It is used for live/export percussion with additional synthesized accents. The full original recording and local source path are not included. No separate licence for this recording is asserted by this notice.

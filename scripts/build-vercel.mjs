@@ -1,6 +1,6 @@
 // Build a static frontend with embedded costume textures and soundtrack.
 // API/media routes remain backed by the separately deployed keepsake Worker.
-import { readFile, writeFile, mkdir } from 'node:fs/promises';
+import { readFile, writeFile, mkdir, rm } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { resolve } from 'node:path';
 import { Script } from 'node:vm';
@@ -48,4 +48,16 @@ html = html.replace('window.LION_ASSETS=', () => `window.LION_AUDIO_URL=${JSON.s
 for (const script of html.matchAll(/<script>([\s\S]*?)<\/script>/g)) new Script(script[1]);
 await mkdir(resolve(root, 'public'), { recursive: true });
 await writeFile(resolve(root, 'public/index.html'), html);
+// Copy only these generated brand icons; no camera media enters the static build.
+for (const [name, destination] of [['lion-favicon-16.png', 'favicon-16.png'], ['lion-favicon-32.png', 'favicon-32.png'], ['lion-favicon-180.png', 'apple-touch-icon.png']]) {
+  const bytes = await readFile(resolve(root, 'client/assets/favicon', name));
+  await writeFile(resolve(root, 'public', destination), bytes);
+}
+try {
+  const bytes = await readFile(resolve(root, 'client/assets/favicon/favicon.ico'));
+  await writeFile(resolve(root, 'public/favicon.ico'), bytes);
+} catch (error) {
+  if (error.code !== 'ENOENT') throw error;
+  await rm(resolve(root, 'public/favicon.ico'), { force: true });
+}
 console.log(JSON.stringify({ staticHtmlBytes: Buffer.byteLength(html), embeddedCostumeAssets: embedded.size, embeddedAudioBytes: soundtrack.length }));
