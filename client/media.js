@@ -1,6 +1,9 @@
-/* Canvas + owned soundtrack recording. No microphone or external dependencies. */
+/* Canvas + owned soundtrack recording. No microphone. Offline timelapse codecs load from a pinned CDN. */
 (() => {
   'use strict';
+  // Mediabunny 1.61.3 (MPL-2.0), unmodified CDN module for offline exports.
+  // Source/license: https://github.com/Vanilagy/mediabunny/tree/v1.61.3
+  let timelapseLibraryPromise;
   /* Chromium's fragmented MP4 recorder can emit zero/repeated AAC timestamps
    * after pause/resume. The encoded AAC frames are intact. Repair only a proven
    * broken AAC-LC clock, in place: no sample payload, box size or video timestamp
@@ -317,8 +320,18 @@
       return promise;
     }
 
-    captureFrame() {
-      if (this._recorder?.state === 'recording') this._videoTrack?.requestFrame?.();
+    captureFrame({ force = false } = {}) {
+      if (this._recorder?.state !== 'recording' || !this._videoTrack || this._videoTrack.readyState === 'ended') return false;
+      if (force) {
+        // captureStream requires a canvas paint even when the final image holds.
+        // An exact self-copy marks it painted without changing the artwork.
+        const q = this.canvas.getContext('2d');
+        q.save(); q.resetTransform(); q.globalAlpha = 1; q.globalCompositeOperation = 'copy';
+        q.filter = 'none'; q.shadowColor = 'transparent'; q.shadowBlur = 0;
+        q.drawImage(this.canvas, 0, 0); q.restore();
+      }
+      this._videoTrack.requestFrame?.();
+      return true;
     }
 
     prepare() {
@@ -433,6 +446,7 @@
       }
       if (!this._valid(token)) return false;
       this._roundActive = true;
+      if (recorder && !this.captureFrame({ force: true })) throw new Error('The video capture track stopped.');
       this._startMusic();
       this._status(this._finishing ? 'finishing' : recorder ? 'recording' : 'playing', { recording: !!recorder });
       return true;
@@ -446,9 +460,21 @@
     async _endRound(token) {
       const recorder = this._recorder;
       if (!this._roundActive) return true;
-      if (recorder && recorder.state !== 'recording') return false;
+      if (recorder && recorder.state !== 'recording') {
+        this._sessionError = new Error('A drawing section could not finish recording.');
+        return false;
+      }
+      // requestFrame queues capture for the next canvas paint. Keep the sealed
+      // drawing on screen through that paint before pausing the recorder.
+      if (recorder) {
+        if (!this.captureFrame({ force: true })) throw new Error('The final drawing frame could not be captured.');
+        await this._delay(80);
+        if (!this._valid(token)) return false;
+        if (!this.captureFrame({ force: true })) throw new Error('The final drawing frame could not be captured.');
+        await this._delay(24);
+      }
       this._stopMusic(true);
-      await this._delay(16); // Record the short click-free music fade while the drawing frame holds.
+      await this._delay(16); // Keep music through the hold, then record its click-free fade.
       if (!this._valid(token)) return false;
       if (recorder) await this._waitEvent(recorder, 'pause', () => recorder.pause());
       // Suspend the private clock too; silent frames must not accumulate during resets.
@@ -464,13 +490,23 @@
     endRound() {
       return this._enqueue(async token => {
         try { return await this._endRound(token); }
-        catch (e) { if (this._valid(token)) this._status('warning', { warning: e.message }); return false; }
+        catch (e) {
+          if (this._valid(token)) {
+            this._sessionError = e;
+            this._status('warning', { warning: `${e.message} The incomplete video will not be saved.` });
+          }
+          return false;
+        }
       });
     }
 
     finish() {
       return this._enqueue(async token => {
-        if (this._sessionError) this._cleanupSession();
+        if (this._sessionError) {
+          this._cleanupSession();
+          this._status('warning', { warning: 'A drawing section did not finish recording. Save the poster or record again for a complete video.' });
+          return null;
+        }
         try {
           this._finishing = true;
           if (!await this._beginRound(token)) { this._cleanupSession(); return null; }
@@ -483,7 +519,10 @@
           this.hit(1.15, true);
           await this._delay(2000);
           if (!this._valid(token)) return null;
-          await this._endRound(token);
+          if (!await this._endRound(token)) {
+            if (this._valid(token)) this._cleanupSession();
+            return null;
+          }
           if (!this._valid(token)) return null;
           const recorder = this._recorder;
           if (!recorder) {
@@ -492,7 +531,8 @@
             return null;
           }
           await this._waitEvent(recorder, 'stop', () => recorder.stop(), 5000);
-          if (!this._valid(token) || this._sessionError) return null;
+          if (!this._valid(token)) return null;
+          if (this._sessionError) throw this._sessionError;
           const mime = recorder.mimeType || this._chunks[0]?.type || 'video/webm';
           let blob = new Blob(this._chunks, { type: mime });
           if (mime.includes('mp4')) {
@@ -513,14 +553,14 @@
       });
     }
 
-    /* Call inside a result button's click handler. Re-encode the completed video
-     * at a faster rate; percussion is replayed at its original tempo. The normal
-     * highlight Blob is never replaced. No footage leaves this browser.
-     * onProgress receives {progress:0..1,phase,speed}. Abort rejects AbortError.
-     */
+    /* Decode by source timestamp and encode explicit output timestamps. Encoding
+     * speed never controls which drawing frames are selected. The normal clip
+     * stays intact; unsupported browsers keep that download available. */
     async makeTimelapse(clip, { speed = 3, signal, onProgress = () => {} } = {}) {
       if (!clip?.blob?.size) throw new Error('Make your normal highlight before creating a timelapse.');
-      if (!this.available) throw new Error('Timelapse recording is unavailable in this browser. Your normal highlight is still available.');
+      if (!window.VideoDecoder || !window.VideoEncoder || !window.AudioEncoder) {
+        throw new Error('Timelapse export is unavailable in this browser. Your normal highlight is still available.');
+      }
       if (this._timelapseController) throw new Error('Your timelapse is already being made.');
       speed = Math.max(1.5, Math.min(6, Number(speed) || 3));
       const token = this._generation, controller = new AbortController(), abortSignal = controller.signal;
@@ -531,116 +571,123 @@
       const externalAbort = () => controller.abort();
       signal?.addEventListener('abort', externalAbort, { once: true });
       if (signal?.aborted) controller.abort();
-      const video = document.createElement('video'), canvas = document.createElement('canvas');
-      video.muted = true; video.playsInline = true; video.preload = 'auto';
-      let url, stream, recorder, music, gain, destination, frameId, rafId, recorderError = null, lastPaint = -Infinity, frameCount = 0;
-      const wait = (target, event, action, timeout = 12000) => new Promise((resolve, reject) => {
+      let input, output, iterator, frameCount = 0;
+      const wait = (task, timeout = 30000) => new Promise((resolve, reject) => {
         let settled = false;
-        const finish = error => {
+        const end = (error, value) => {
           if (settled) return; settled = true; clearTimeout(timer);
-          target.removeEventListener(event, success); target.removeEventListener('error', failure); abortSignal.removeEventListener('abort', cancel);
-          error ? reject(error) : resolve(true);
+          abortSignal.removeEventListener('abort', cancel);
+          error ? reject(error) : resolve(value);
         };
-        const success = () => finish(), failure = e => finish(e.error || new Error('This browser could not process the timelapse video.'));
-        const cancel = () => finish(aborted());
-        const timer = setTimeout(() => finish(new Error('Timelapse processing timed out. Keep this tab open and try again.')), timeout);
-        target.addEventListener(event, success, { once: true }); target.addEventListener('error', failure, { once: true });
+        const cancel = () => end(aborted());
+        const timer = setTimeout(() => end(new Error('Timelapse processing timed out. Your normal highlight is still available.')), timeout);
         abortSignal.addEventListener('abort', cancel, { once: true });
-        try { check(); action?.(); } catch (e) { finish(e); }
+        Promise.resolve(task).then(value => end(null, value), error => end(error));
+        if (abortSignal.aborted) cancel();
       });
+      const release = () => {
+        try { input?.dispose(); } catch (_) {}
+        if (output && output.state !== 'finalized' && output.state !== 'canceled') output.cancel().catch(() => {});
+      };
+      abortSignal.addEventListener('abort', release, { once: true });
       try {
         check(); report(0, 'loading');
-        url = URL.createObjectURL(clip.blob); video.src = url;
-        // Activate audio and video immediately in the initiating user gesture.
+        // Audio activation happens in the initiating click; offline encoding uses
+        // decoded PCM at its original sample rate, rather than accelerated audio.
         const audioTask = this.init();
-        const priming = video.play().catch(() => false);
-        if (video.readyState < 2) await wait(video, 'loadeddata');
-        video.pause();
-        await audioTask; await priming; check();
-        if (!this._audio || this._audio.state !== 'running' || !this._buffer) {
-          throw new Error('The timelapse soundtrack could not start. Try again; your normal highlight is still available.');
+        if (!timelapseLibraryPromise) {
+          timelapseLibraryPromise = import('https://cdn.jsdelivr.net/npm/mediabunny@1.61.3/+esm');
+          timelapseLibraryPromise.catch(() => { timelapseLibraryPromise = null; });
         }
-        const sourceDuration = Number.isFinite(video.duration) && video.duration > 0 ? video.duration : Number(clip.duration);
-        if (!Number.isFinite(sourceDuration) || sourceDuration <= 0 || !video.videoWidth || !video.videoHeight) {
-          throw new Error('This browser could not read your highlight for a timelapse. Download the normal highlight instead.');
+        const m = await wait(timelapseLibraryPromise, 15000);
+        await wait(audioTask, 15000); check();
+        if (!this._audio || !this._buffer) throw new Error('The timelapse soundtrack could not load. Your normal highlight is still available.');
+        input = new m.Input({ formats: m.ALL_FORMATS, source: new m.BlobSource(clip.blob) });
+        const track = await wait(input.getPrimaryVideoTrack()); check();
+        if (!track || !await wait(track.canDecode())) throw new Error('This browser cannot decode the highlight for a timelapse. Your normal highlight is still available.');
+        const [first, videoEnd, movieEnd, width, height] = await wait(Promise.all([
+          track.getFirstTimestamp(), track.computeDuration(), input.computeDuration(), track.getDisplayWidth(), track.getDisplayHeight()
+        ])); check();
+        // A final static frame may hold until the audio/movie finishes. Keep that
+        // legitimate tail, while detecting missing samples inside the video.
+        const sourceDuration = Math.max(videoEnd, movieEnd) - first, duration = sourceDuration / speed;
+        if (!Number.isFinite(duration) || duration <= .01 || duration > 300 || !width || !height) {
+          throw new Error('This browser could not read the highlight timeline. Your normal highlight is still available.');
         }
-        if (video.currentTime > .001) await wait(video, 'seeked', () => { video.currentTime = 0; });
-        const scale = Math.min(1, 720 / video.videoWidth, 1280 / video.videoHeight);
-        canvas.width = Math.max(2, Math.round(video.videoWidth * scale / 2) * 2);
-        canvas.height = Math.max(2, Math.round(video.videoHeight * scale / 2) * 2);
+        const canvas = document.createElement('canvas'), scale = Math.min(1, 720 / width, 1280 / height);
+        canvas.width = Math.max(2, Math.round(width * scale / 2) * 2);
+        canvas.height = Math.max(2, Math.round(height * scale / 2) * 2);
         const q = canvas.getContext('2d', { alpha: false });
-        if (!q || !canvas.captureStream) throw new Error('Timelapse export is unavailable in this browser. Download the normal highlight instead.');
-        stream = canvas.captureStream(0);
-        if (typeof stream.getVideoTracks()[0]?.requestFrame !== 'function') {
-          stream.getTracks().forEach(track => track.stop()); stream = canvas.captureStream(30);
-        }
-        const videoTrack = stream.getVideoTracks()[0];
-        destination = this._audio.createMediaStreamDestination();
-        for (const track of destination.stream.getAudioTracks()) stream.addTrack(track);
-        gain = this._audio.createGain(); gain.gain.value = 0; gain.connect(destination);
-        music = this._audio.createBufferSource(); music.buffer = this._buffer; music.loop = true; music.playbackRate.value = 1; music.connect(gain);
-        const types = ['video/mp4;codecs=avc1.42E01E,mp4a.40.2', 'video/mp4', 'video/webm;codecs=vp8,opus', 'video/webm', ''];
-        for (const mimeType of types) {
-          if (mimeType && !MediaRecorder.isTypeSupported(mimeType)) continue;
-          try { recorder = new MediaRecorder(stream, { ...(mimeType ? { mimeType } : {}), videoBitsPerSecond: 1500000, audioBitsPerSecond: 128000 }); break; } catch (_) {}
-        }
-        if (!recorder) throw new Error('This browser cannot encode a timelapse. Download the normal highlight instead.');
-        const chunks = [];
-        recorder.addEventListener('dataavailable', e => { if (e.data.size) chunks.push(e.data); });
-        recorder.addEventListener('error', e => { recorderError = e.error || new Error('Timelapse encoding failed.'); controller.abort(); });
-        // A manual canvas stream needs its first frame before Chromium can
-        // acknowledge encoder start; waiting first would deadlock the recorder.
-        await wait(recorder, 'start', () => {
-          recorder.start(250); q.drawImage(video, 0, 0, canvas.width, canvas.height); videoTrack.requestFrame?.();
-        }, 5000); check();
-        const paint = now => {
-          if (abortSignal.aborted || !this._valid(token)) return;
-          if (video.readyState >= 2 && now - lastPaint >= 1000 / 30) {
-            lastPaint = now; q.drawImage(video, 0, 0, canvas.width, canvas.height); videoTrack.requestFrame?.(); frameCount++;
-            report(Math.min(.99, video.currentTime / sourceDuration), 'encoding');
+        if (!q) throw new Error('Timelapse canvas is unavailable. Your normal highlight is still available.');
+        const soundtrack = this._buffer, channels = Math.min(2, soundtrack.numberOfChannels), sampleRate = soundtrack.sampleRate;
+        const videoOptions = { width: canvas.width, height: canvas.height, bitrate: 1500000, frameRate: 30 };
+        const audioOptions = { numberOfChannels: channels, sampleRate, bitrate: 128000 };
+        let videoCodec, audioCodec, format;
+        if (await wait(m.canEncodeVideo('avc', videoOptions)) && await wait(m.canEncodeAudio('aac', audioOptions))) {
+          videoCodec = 'avc'; audioCodec = 'aac'; format = new m.Mp4OutputFormat({ fastStart: 'in-memory' });
+        } else if (await wait(m.canEncodeVideo('vp8', videoOptions)) && await wait(m.canEncodeAudio('opus', audioOptions))) {
+          videoCodec = 'vp8'; audioCodec = 'opus'; format = new m.WebMOutputFormat();
+        } else throw new Error('This browser cannot encode a timelapse with sound. Your normal highlight is still available.');
+        check();
+        const target = new m.BufferTarget();
+        output = new m.Output({ format, target });
+        const videoSource = new m.CanvasSource(canvas, { codec: videoCodec, bitrate: 1500000, keyFrameInterval: 1 });
+        const audioSource = new m.AudioBufferSource({ codec: audioCodec, bitrate: 128000 });
+        output.addVideoTrack(videoSource, { frameRate: 30 }); output.addAudioTrack(audioSource);
+        await wait(output.start()); check();
+        const totalFrames = Math.ceil(duration * 30), totalAudioSamples = Math.ceil(duration * sampleRate);
+        const times = Array.from({ length: totalFrames }, (_, i) => first + i * speed / 30);
+        iterator = new m.VideoSampleSink(track).samplesAtTimestamps(times);
+        let audioSamples = 0;
+        const addAudioUntil = async timestamp => {
+          const through = Math.min(totalAudioSamples, Math.ceil(timestamp * sampleRate));
+          while (audioSamples < through) {
+            check();
+            const length = Math.min(through - audioSamples, sampleRate);
+            const buffer = this._audio.createBuffer(channels, length, sampleRate);
+            for (let c = 0; c < channels; c++) {
+              const original = soundtrack.getChannelData(c), data = buffer.getChannelData(c);
+              for (let j = 0; j < length; j++) {
+                const at = audioSamples + j, t = at / sampleRate;
+                const fade = Math.max(0, Math.min(1, t / .03, (duration - t) / .04));
+                data[j] = original[at % original.length] * .85 * fade;
+              }
+            }
+            await wait(audioSource.add(buffer)); audioSamples += length;
           }
         };
-        const frame = now => { paint(now); if (!video.ended && !abortSignal.aborted) frameId = video.requestVideoFrameCallback(frame); };
-        const fallbackFrame = now => { paint(now); if (!video.ended && !abortSignal.aborted) rafId = requestAnimationFrame(fallbackFrame); };
-        paint(performance.now());
-        if (typeof video.requestVideoFrameCallback === 'function') frameId = video.requestVideoFrameCallback(frame);
-        else rafId = requestAnimationFrame(fallbackFrame);
-        video.playbackRate = speed;
-        const startedAt = performance.now(), audioNow = this._audio.currentTime;
-        gain.gain.setValueAtTime(0, audioNow); gain.gain.linearRampToValueAtTime(.85, audioNow + .03);
-        music.start(audioNow);
-        await wait(video, 'ended', () => {
-          video.play().catch(error => { recorderError = error; controller.abort(); });
-        }, Math.max(20000, sourceDuration / speed * 2500 + 15000));
-        check(); if (recorderError) throw recorderError;
-        // A final hold keeps the last frame complete and gives percussion a short fade.
-        q.drawImage(video, 0, 0, canvas.width, canvas.height); videoTrack.requestFrame?.();
-        gain.gain.cancelScheduledValues(this._audio.currentTime);
-        gain.gain.setValueAtTime(gain.gain.value, this._audio.currentTime);
-        gain.gain.linearRampToValueAtTime(0, this._audio.currentTime + .04);
-        await this._delay(60); check();
-        const duration = (performance.now() - startedAt) / 1000;
-        await wait(recorder, 'stop', () => recorder.stop(), 7000); check();
-        if (recorderError) throw recorderError;
-        let blob = new Blob(chunks, { type: recorder.mimeType || chunks[0]?.type || 'video/webm' });
-        if (blob.type.includes('mp4')) {
-          const clock = repairMp4AudioClock(new Uint8Array(await blob.arrayBuffer())); check();
-          if (clock.repaired) blob = new Blob([clock.bytes], { type: blob.type });
+        for (let i = 0; i < totalFrames; i++) {
+          check();
+          const { value: sample, done } = await wait(iterator.next()); check();
+          if (done || !sample) throw new Error('The highlight has an unreadable frame. Your normal highlight is still available.');
+          try {
+            // A damaged source cannot be repaired by inventing footage. Reject
+            // long missing-frame intervals instead of exporting a frozen result.
+            if (times[i] < videoEnd && times[i] - sample.timestamp > 1.25) throw new Error('The highlight is missing video frames. Keep the normal highlight and record again for a complete timelapse.');
+            sample.draw(q, 0, 0, canvas.width, canvas.height);
+            const timestamp = i / 30, frameDuration = Math.min(1 / 30, duration - timestamp);
+            await wait(videoSource.add(timestamp, frameDuration));
+            await addAudioUntil(timestamp + frameDuration);
+            frameCount++;
+            report(frameCount / totalFrames * .95, 'encoding');
+          } finally { sample.close(); }
+          // Keep progress and cancellation responsive under a slow software codec.
+          if (i % 8 === 7) await wait(new Promise(resolve => setTimeout(resolve, 0)));
         }
-        if (!blob.size || frameCount < 2) throw new Error('The browser did not finish the timelapse. Your normal highlight is still available.');
+        await addAudioUntil(duration); videoSource.close(); audioSource.close();
+        report(.97, 'finishing'); await wait(output.finalize()); check();
+        const mime = await wait(output.getMimeType()), blob = new Blob([target.buffer], { type: mime });
+        if (!blob.size || frameCount !== totalFrames) throw new Error('The browser did not finish every timelapse frame. Your normal highlight is still available.');
         report(1, 'complete');
-        return { blob, mime: blob.type, duration, speed };
+        return { blob, mime, duration, speed, frames: frameCount, sourceDuration };
       } catch (error) {
-        if (recorderError) throw recorderError;
-        throw error;
+        if (abortSignal.aborted || !this._valid(token)) throw aborted();
+        const message = error?.message || 'Timelapse export failed.';
+        throw new Error(message.includes('normal highlight') ? message : `${message} Your normal highlight is still available.`);
       } finally {
-        if (frameId != null) video.cancelVideoFrameCallback?.(frameId);
-        if (rafId != null) cancelAnimationFrame(rafId);
-        video.pause(); video.removeAttribute('src'); video.load();
-        if (recorder && recorder.state !== 'inactive') { try { recorder.stop(); } catch (_) {} }
-        stream?.getTracks().forEach(track => track.stop()); destination?.stream.getTracks().forEach(track => track.stop());
-        try { music?.stop(); } catch (_) {} try { music?.disconnect(); } catch (_) {} try { gain?.disconnect(); } catch (_) {}
-        if (url) URL.revokeObjectURL(url);
+        release();
+        try { await iterator?.return(); } catch (_) {}
+        abortSignal.removeEventListener('abort', release);
         signal?.removeEventListener('abort', externalAbort);
         if (this._timelapseController === controller) this._timelapseController = null;
         if (this._audio?.state === 'running' && !this._roundActive) {

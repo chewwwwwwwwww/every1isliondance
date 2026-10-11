@@ -4,7 +4,11 @@
 
 Lion Dance Motion Ink is a webcam experience for one, two, or three people drawing together at one camera. Move your nose—or a chosen wrist in seated mode—to make a Chinese blessing, wear a southern-lion-inspired costume, and take home your own red packet and video.
 
-[Open on Vercel](https://every1isliondance.vercel.app) · [Original live demo](https://lion-dance-motion-ink.activepearl4.chatgpt.site)
+[Open on Vercel](https://every1isliondance.vercel.app) · [Original Site and keepsake backend](https://lion-dance-motion-ink.activepearl4.chatgpt.site)
+
+**Edition 05 / v2.5:** the red stage becomes the results view, the normal highlight starts playing, and a 3× timelapse and QR keepsake are prepared automatically. This edition targets the Vercel frontend; the original Site remains the existing Worker/R2 backend and retains its earlier frontend. Final v2.5 deployment and verification are pending.
+
+**Before starting:** Automatically make a QR keepsake at the end is checked by default. It uploads the finished poster and available videos to a public, unlisted link. Turn it off before starting to keep the media on this device. Camera processing stays local, and no microphone is recorded.
 
 ## Run locally
 
@@ -17,7 +21,7 @@ npm run build
 npm run preview
 ```
 
-Open **http://localhost:4173** in current Chrome or Edge. Allow camera access and stand in your numbered lane. The first startup downloads MediaPipe JavaScript, WASM, and tracking models from CDNs. Warm the browser cache before an event; internet is still needed for uncached dependencies, fonts, and the QR library.
+Open **http://localhost:4173** in current Chrome or Edge. Review the automatic QR option, allow camera access and stand in your numbered lane. The first startup downloads MediaPipe JavaScript, WASM, and tracking models from CDNs. Timelapse conversion loads Mediabunny 1.61.3 from a pinned CDN. Warm the browser cache before an event; internet is still needed for uncached dependencies, fonts, and the QR library.
 
 The local server runs the real compiled Worker with an **in-memory R2-compatible bucket**. Poster/video uploads, keepsake pages, byte-range video playback, and deletion work locally. Stored keepsakes disappear when the preview process stops. Localhost QR links open only on the same device; use the live demo for links that attendees can open on their phones.
 
@@ -35,9 +39,9 @@ Import this repository into Vercel. `vercel.json` selects a static deployment wi
 npm run build:vercel
 ```
 
-`scripts/build-vercel.mjs` first builds the current client, then embeds all six costume WebPs and the soundtrack into `public/index.html`. Camera tracking and media generation continue to run in the browser. External model/font/QR dependencies still need their CDNs.
+`scripts/build-vercel.mjs` first builds the current client, then embeds all six costume WebPs and the soundtrack into `public/index.html`. Camera tracking and media generation continue to run in the browser. External model/font/QR and timelapse-library dependencies still need their CDNs.
 
-Vercel proxies `/api/*` and `/media/*` to the existing keepsake Worker at `lion-dance-motion-ink.activepearl4.chatgpt.site`. **That Worker and its persistent R2 bucket remain the sharing backend.** This deployment does not move storage or API processing into Vercel. Keepsake QR links use the backend's canonical Sites address; this is expected.
+Vercel proxies `/api/*` and `/media/*` to the existing keepsake Worker at `lion-dance-motion-ink.activepearl4.chatgpt.site`. **That Worker and its persistent R2 bucket remain the sharing backend, unchanged for this edition.** This deployment does not move storage or API processing into Vercel. New QR links use the frontend's origin, so a keepsake created on Vercel opens the Vercel viewer while its media is served through the existing rewrites. Older Sites keepsake links remain valid.
 
 The production frontend `https://every1isliondance.vercel.app` is registered with the backend. Before a cloned frontend can share or delete keepsakes, the backend owner must register its **exact HTTPS origin** in the backend's allowed-origin configuration. The committed rewrites alone do not grant access. If deploying your own keepsake Worker, update both rewrite destinations, bind its persistent `BUCKET`, and configure the matching frontend origin. Arbitrary preview deployment origins are not automatically allowed.
 
@@ -49,7 +53,7 @@ The production frontend `https://every1isliondance.vercel.app` is registered wit
 - The timer finishes a dancer's mark after meaningful movement. Someone who has not moved gets another five seconds. Raise **both hands above your head for about one second** to finish early, or use the optional Seal button. Standing still does not finish a mark.
 - Pause and tracking loss preserve round time and pause recording. Close-up tracking uses the measured face; a wider view supports body movement. The cursor stays in the mirrored camera's coordinate space, with gentle smoothing and no movement amplification.
 - Photoreal costume textures follow measured body landmarks. Close-up views show headgear above the forehead; clothing appears only when the torso is reliably measured. The face remains visible.
-- Fullscreen shows the red stage and camera with compact **Pause**, **Start over**, and **Exit fullscreen** controls. Press **Esc** to restore the full interface. When the finished export is ready, the app returns to the results automatically.
+- Fullscreen shows the red stage and camera with compact **Pause**, **Start over**, and **Exit fullscreen** controls. The results remain inside that stage, so fullscreen stays open through playback, downloads and the QR. Press **Esc** or use Exit fullscreen to restore the full interface.
 - The red packet contains **the participants' actual strokes**. Paths are positioned and uniformly scaled into the blessing while preserving their curves, proportions, and pen lifts.
 
 ### Drawing time adapts to each part
@@ -68,13 +72,15 @@ Everyone in a simultaneous round receives the longest assigned window. A brief 0
 ## Take-home media
 
 - **Red packet:** 900 × 1200 PNG of the actual shared artwork.
-- **Normal highlight:** 720 × 1280 portrait video containing the active drawing rounds and final celebration. Calibration, countdowns, pauses, and resets are omitted. MP4 is preferred where the browser can encode it; WebM is the fallback.
-- **3× timelapse:** generated on request from the finished highlight inside the browser. The pictures speed up while lion-dance percussion plays at its original tempo. The normal clip remains available. Keep the tab open during conversion; browser recording support and device performance affect availability.
-- **QR keepsake:** explicitly choosing Share by QR uploads the poster and available video variants to a public, unlisted link. Make the timelapse before sharing to include both videos. The phone page previews and downloads either version. The sharing browser can remove its keepsake.
+- **Normal highlight:** 720 × 1280 portrait video containing the active drawing rounds and final celebration. Calibration, countdowns, pauses, and resets are omitted. It starts playing in the main red results stage and remains the selected version while the timelapse is prepared. Browser autoplay rules can require muted playback or a tap on Play. MP4 is preferred where the browser can encode it; WebM is the fallback.
+- **3× timelapse:** created automatically from the finished highlight inside the browser. Mediabunny 1.61.3 decodes samples by source timestamp; WebCodecs encodes explicit output timestamps at 30 fps. Encoding speed does not decide which parts are included. The supplied percussion stays at its original tempo. The normal clip remains intact and selected. Keep the tab open during conversion; it can take longer than the resulting video.
+- **QR keepsake:** with the disclosed default option enabled, the finished poster, normal highlight and successfully generated timelapse are uploaded automatically. A Vercel-origin QR appears in the red results stage. The phone viewer switches between and downloads both versions. Turn the option off before starting for local downloads; Share by QR remains available when you choose to share later. The sharing browser can remove its keepsake.
+
+If recording fails or a round cannot be recorded, the app continues drawing and offers the artwork/poster, rather than publishing a partial normal video. Automatic QR can then share the poster alone. If the browser cannot decode or encode a complete timelapse with sound, conversion shows an error and retains the normal download; it does not silently fall back to accelerated real-time playback. Oversized videos can also use poster-only QR sharing.
 
 Use the device's native Share video action where available, or download the clip and upload it to Instagram. The app does not post to social accounts itself.
 
-Camera frames and landmark processing stay in the browser. No microphone is recorded. The supplied soundtrack excerpt is served at `/soundtrack.mp3` and is mixed with synthesized drum/cymbal accents; muting live playback does not mute the export. Media remains on the device until the explicit QR sharing action. Anyone with a shared link can view it. Upload limits are 8 MiB for the poster and 24 MiB for each video; a poster-only share remains available for oversized clips.
+Camera frames and landmark processing stay in the browser. No microphone is recorded. The supplied soundtrack excerpt is served at `/soundtrack.mp3` and is mixed with synthesized drum/cymbal accents in the normal highlight; the timelapse uses the supplied soundtrack at its original rate. Muting live playback does not mute the export. The pre-start automatic QR setting controls whether completed media is uploaded at the end. With that setting off, files stay local until a later Share by QR action. Anyone with a shared link can view it. Upload limits are 8 MiB for the poster and 24 MiB for each video; a poster-only share remains available for oversized clips.
 
 ## Source layout
 
@@ -85,7 +91,7 @@ Camera frames and landmark processing stay in the browser. No microphone is reco
 | `client/pose-worker.js` | MediaPipe pose and optional face tracking in a Worker |
 | `client/cursor-smoothing.js` | Camera-coordinate ink smoothing |
 | `client/lion-filter.js` | Face-safe headgear and measured-body costume rendering |
-| `client/media.js` | Canvas recording, soundtrack mix, MP4 audio-clock repair, and timelapse generation |
+| `client/media.js` | Canvas recording, soundtrack mix, MP4 audio-clock repair, and deterministic source-timestamp timelapse export |
 | `client/glyph-library.js` | Curated reference geometry, movement groups, and blessing catalogue |
 | `client/base.js` | Canvas utilities and retained glyph attribution |
 | `client/assets/` | Original generated costume PNGs, optimized WebPs, prompts, and design references |
@@ -106,7 +112,7 @@ The repository also includes `index.html`, a standalone file with the costumes a
 
 For a complete independent backend deployment, provide a Worker-compatible runtime and a persistent R2 bucket bound as **`BUCKET`**. The repository has no deployment credentials or production project binding. Hosting only `dist/index.html` does not supply its asset routes or the keepsake backend. The provided Vercel configuration supplies a static frontend plus a proxy to the existing backend. Production storage lifetime and any cleanup policy belong to the backend deployment; the app does not promise automatic expiry.
 
-The browser loads MediaPipe Tasks Vision **0.10.32**, the Lite pose model, an optional face model, QRCode.js, and Google Fonts externally. If camera/model startup fails, **Try free ink with a cursor** works without camera tracking. **Preview** is a labelled automated demonstration using sample strokes and procedural lions, not footage of participants.
+The browser loads MediaPipe Tasks Vision **0.10.32**, the Lite pose model, an optional face model, QRCode.js, Google Fonts, and timelapse-only **Mediabunny 1.61.3** externally. Timelapse requires working browser VideoDecoder, VideoEncoder and AudioEncoder support for the selected codecs; unsupported browsers keep the normal download. If camera/model startup fails, **Try free ink with a cursor** works without camera tracking. **Preview** is a labelled automated demonstration using sample strokes and procedural lions, not footage of participants.
 
 ## Credits and retained notices
 
@@ -118,6 +124,6 @@ The soundtrack excerpt was supplied by the project creator. This repository pres
 
 See [`THIRD_PARTY.md`](THIRD_PARTY.md) for dependency and media provenance.
 
-The app source matches published Sites version 7, commit `644cb6c8a8a5e6e7dee350c2b8e01731e722d9ec`, with portable build/deployment metadata and local path redaction added for this public repository.
+Edition 05 changes the frontend and browser media implementation beyond published Sites version 7. This edition targets Vercel only; the existing Sites Worker/R2 backend remains in use. Final deployment and media/sharing checks are pending.
 
 Made for Common Ground. A playful contemporary interpretation of southern lion dance and the joy of making together.

@@ -16,7 +16,10 @@ The application fetches these dependencies at runtime; their code and models are
 | Pose model | Pose Landmarker Lite, float16, model version 1 | [Pose Landmarker documentation](https://ai.google.dev/edge/mediapipe/solutions/vision/pose_landmarker) |
 | Optional face model | Face Landmarker, float16, model version 1 | [Face Landmarker documentation](https://ai.google.dev/edge/mediapipe/solutions/vision/face_landmarker) |
 | QR generator | `qrcodejs@1.0.0` | [QRCode.js](https://github.com/davidshimjs/qrcodejs) |
+| Timelapse media toolkit | `mediabunny@1.61.3`, dynamically imported from jsDelivr `+esm`; MPL-2.0 | [Mediabunny source and licence](https://github.com/Vanilagy/mediabunny) |
 | Fonts | DM Sans, Manrope, Newsreader via Google Fonts | [Google Fonts](https://github.com/google/fonts) |
+
+Edition 05 uses Mediabunny only in the browser to read the completed local highlight, decode frames by source timestamp, and mux the WebCodecs-generated 30 fps derivative with original-rate soundtrack audio. The dependency is pinned and unmodified; no participant footage is sent to its CDN. The CDN supplies library code, while decoding and encoding happen locally. Unsupported codecs are reported rather than replaced with an accelerated real-time recorder.
 
 ## Costume assets
 
