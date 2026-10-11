@@ -1,10 +1,11 @@
 /* Pure lobby readiness checks. Coordinates are raw, unmirrored camera space.
- * MediaPipe's Thumb_Up classifier is mandatory; body wrists never imply a thumb.
+ * Readiness is one lifted hand, without requiring a particular finger shape.
  */
 (() => {
   'use strict';
   const finite = p => p && Number.isFinite(p.x) && Number.isFinite(p.y) && p.x >= 0 && p.x <= 1 && p.y >= 0 && p.y <= 1;
   const credible = p => finite(p) && (p.visibility ?? 1) >= .6 && (p.presence ?? 1) >= .6;
+  const wristCredible = p => finite(p) && (p.visibility ?? 1) >= .45 && (p.presence ?? 1) >= .45;
   const distance = (a, b, aspect = 1) => Math.hypot((a.x - b.x) * aspect, a.y - b.y);
   const inLane = (p, lane, lanes, margin = .006) => finite(p) && p.x > lane / lanes + margin && p.x < (lane + 1) / lanes - margin;
   const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
@@ -57,25 +58,27 @@
     if (!ref?.seen || !ref.distinct || !inLane(wrist, ref.lane, ref.lanes)) return false;
     const head = ref.anchor, vertical = Math.min(.5, Math.max(.28, head.headHeight * 3.5));
     return wrist.y > head.y - Math.max(.14, head.headHeight * 1.2) && wrist.y < head.y + vertical
-      && distance(wrist, head, aspect) < Math.min(.65, Math.max(.22, head.headWidth * aspect * 3.5));
+      && distance(wrist, head, aspect) < Math.min(.72, Math.max(.28, head.headWidth * aspect * 4.5,head.headHeight*1.5));
   }
+  function upperChest(ref) {
+    const head=ref.anchor,shoulders=[ref.pose?.[11],ref.pose?.[12]].filter(wristCredible);
+    const shoulderY=shoulders.length===2?(shoulders[0].y+shoulders[1].y)/2:shoulders[0]?.y;
+    return Math.min(head.y+.5,Math.max(head.y+Math.min(.40,head.headHeight*2.5),Number.isFinite(shoulderY)?shoulderY+.05:0));
+  }
+  function raised(wrist,ref,aspect=1) {return nearby(wrist,ref,aspect)&&wrist.y<=upperChest(ref);}
   function association(hand, refs, aspect = 1) {
     const wrist = hand.landmarks?.[0];
     if (!finite(wrist)) return { owner: -1, reason: 'show-hand' };
     const palm = distance(hand.landmarks[5],hand.landmarks[17],aspect), matches = [];
     for (const ref of refs) {
-      if (!nearby(wrist, ref, aspect)) continue;
-      // Tight face framing can produce credible-looking body wrists near the
-      // bottom edge. Only wrists in this player's ready-hand neighborhood are
-      // relevant; unrelated detections must not suppress close-up face ownership.
-      const wrists = [ref.pose?.[15],ref.pose?.[16]].filter(p => credible(p) && nearby(p,ref,aspect));
+      if (!raised(wrist, ref, aspect)) continue;
+      const wrists = [ref.pose?.[15],ref.pose?.[16]].filter(p => wristCredible(p) && raised(p,ref,aspect));
       if (wrists.length) {
         const d = Math.min(...wrists.map(p => distance(wrist,p,aspect)));
-        if (d <= Math.max(.045, palm * 1.6)) matches.push({ lane: ref.lane, d, source: 'wrist' });
-      } else {
-        // Close-up users may have no valid body pose. A hand must stay beside
-        // their one local face; lane membership alone never establishes owner.
-        const limit = Math.min(.38, Math.max(.12,ref.anchor.headWidth * aspect * 2.1));
+        if (d <= Math.max(.07, palm * 1.8)) matches.push({ lane: ref.lane, d, source: 'wrist' });
+      }
+      if(!matches.some(p=>p.lane===ref.lane)) {
+        const limit = Math.min(.65, Math.max(.22,ref.anchor.headWidth * aspect * 3.5,ref.anchor.headHeight*1.5));
         const d = distance(wrist,ref.anchor,aspect);
         if (ref.face && d <= limit) matches.push({ lane:ref.lane,d,source:'face' });
       }
@@ -87,21 +90,30 @@
     // even if the neighboring person's hand crossed a crop boundary.
     const best = matches[0];
     for (const ref of refs) if (ref.lane !== best.lane && ref.seen) {
-      const other = [ref.pose?.[15],ref.pose?.[16]].filter(credible);
-      if (other.some(p => distance(wrist,p,aspect) <= best.d + .025)) return { owner:-1,reason:'separate-hands' };
+      const other = [ref.pose?.[15],ref.pose?.[16]].filter(wristCredible);
+      const threshold=best.source==='wrist'?best.d+.025:Math.max(.07,palm*1.8);
+      if (other.some(p => distance(wrist,p,aspect) <= threshold)) return { owner:-1,reason:'separate-hands' };
     }
     return { owner:best.lane,reason:'thumb-up' };
   }
   function observations(hands, refs, aspect = 1) {
     refs.forEach(p => { p.lanes = refs.length; });
-    const out = refs.map(p=>({ thumbsUp:false,score:0,reason:p.seen?'show-thumb':p.reason,hand:null }));
+    const out = refs.map(p=>({ thumbsUp:false,score:0,reason:p.seen?'show-hand':p.reason,hand:null,inputMethod:null }));
+    for(const ref of refs){
+      const wrists=[ref.pose?.[15],ref.pose?.[16]].filter(p=>wristCredible(p)&&raised(p,ref,aspect));
+      for(const wrist of wrists){
+        const ambiguous=refs.some(other=>other.lane!==ref.lane&&other.seen&&[other.pose?.[15],other.pose?.[16]].filter(wristCredible).some(p=>distance(wrist,p,aspect)<.04));
+        if(ambiguous)continue;
+        const score=Math.min(wrist.visibility??1,wrist.presence??1);
+        if(score>out[ref.lane].score)out[ref.lane]={thumbsUp:true,score,reason:'hold-hand',hand:{wrist,thumb:null},inputMethod:'pose-hand'};
+      }
+    }
     for (const hand of hands) {
-      if (hand.label !== 'Thumb_Up' || !Number.isFinite(hand.score) || hand.score < .8) continue;
-      if (!thumbGeometry(hand.landmarks,hand.worldLandmarks,aspect)) continue;
+      if(hand.landmarks?.length!==21||!hand.landmarks.every(finite))continue;
       const match = association(hand,refs,aspect);
       if (match.owner < 0) { if(out[hand.lane]) out[hand.lane].reason=match.reason; continue; }
       const prior=out[match.owner];
-      if (hand.score > prior.score) out[match.owner]={thumbsUp:true,score:hand.score,reason:'hold-thumb',hand:{wrist:hand.landmarks[0],thumb:hand.landmarks[4]}};
+      if (!prior.thumbsUp) out[match.owner]={thumbsUp:true,score:.9,reason:'hold-hand',hand:{wrist:hand.landmarks[0],thumb:hand.landmarks[4]},inputMethod:'hand-landmarks'};
     }
     // A copied/cross-boundary detection must never ready two roles.
     for(let a=0;a<out.length;a++)for(let b=a+1;b<out.length;b++){
@@ -113,21 +125,29 @@
   }
 
   class Hold {
-    constructor(lanes, { holdMs=1200, gapMs=700, minSamples=4 }={}) { this.lanes=lanes;this.holdMs=holdMs;this.gapMs=gapMs;this.minSamples=minSamples;this.reset(); }
+    constructor(lanes, { holdMs=900, gapMs=700, minSamples=3, missMs=250 }={}) { this.lanes=lanes;this.holdMs=holdMs;this.gapMs=gapMs;this.minSamples=minSamples;this.missMs=missMs;this.reset(); }
     reset(epoch=this.epoch) { this.epoch=epoch;this.states=Array(this.lanes).fill(null); }
     update(values,refs,time,epoch,aspect=1) {
       if(epoch!==this.epoch)this.reset(epoch);
       return refs.map((ref,i)=>{
-        const value=values[i]||{thumbsUp:false,score:0,reason:'show-thumb'},prior=this.states[i];
+        const value=values[i]||{thumbsUp:false,score:0,reason:'show-hand'},prior=this.states[i];
         const fresh=Number.isFinite(time)&&(!prior||time>prior.time);
         const changed=prior&&ref.anchor&&distance(ref.anchor,prior.anchor,aspect)>Math.max(.12,ref.anchor.headWidth*aspect*1.5);
-        if(!fresh||!ref.seen||!ref.distinct||!value.thumbsUp){this.states[i]=null;return{...value,thumbsUp:false,ready:false,progress:0,heldMs:0,samples:0,reason:fresh?value.reason:'stale-frame',capturedAt:time,sampledAt:time};}
-        const continuing=prior&&!changed&&time-prior.time<=this.gapMs;
-        const state={start:continuing?prior.start:time,time,samples:continuing?prior.samples+1:1,anchor:ref.anchor};this.states[i]=state;
+        if(value.cached&&ref.seen&&ref.distinct&&!changed&&prior?.result&&time-(prior.seenAt??prior.time)<=this.missMs)return{...prior.result};
+        if(value.cached){this.states[i]=null;return{...value,thumbsUp:false,ready:false,progress:0,heldMs:0,samples:0,reason:'show-hand',capturedAt:value.sampledAt,sampledAt:value.sampledAt};}
+        if(!fresh||!ref.seen||!ref.distinct){this.states[i]=null;return{...value,thumbsUp:false,ready:false,progress:0,heldMs:0,samples:0,reason:fresh?value.reason:'stale-frame',capturedAt:time,sampledAt:time};}
+        if(!value.thumbsUp){
+          const missAt=prior?.missAt??time;
+          const retain=prior&&!changed&&time-missAt<=this.missMs&&time-(prior.seenAt??prior.time)<=this.gapMs;
+          this.states[i]=retain?{...prior,time,missAt}:null;
+          return{...value,thumbsUp:false,ready:false,progress:retain?Math.min(1,(time-prior.start)/this.holdMs):0,heldMs:retain?time-prior.start:0,samples:retain?prior.samples:0,capturedAt:time,sampledAt:time};
+        }
+        const continuing=prior&&!changed&&time-prior.time<=this.gapMs&&(prior.missAt==null||time-prior.missAt<=this.missMs);
+        const state={start:continuing?prior.start:time,time,seenAt:time,samples:continuing?prior.samples+1:1,anchor:ref.anchor};this.states[i]=state;
         const heldMs=Math.max(0,time-state.start),ready=heldMs>=this.holdMs&&state.samples>=this.minSamples;
-        return{...value,ready,progress:Math.min(1,heldMs/this.holdMs),heldMs,samples:state.samples,reason:ready?'ready':'hold-thumb',capturedAt:time,sampledAt:time};
+        const result={...value,ready,progress:Math.min(1,heldMs/this.holdMs),heldMs,samples:state.samples,reason:ready?'ready':'hold-hand',capturedAt:time,sampledAt:time};state.result=result;return result;
       });
     }
   }
-  globalThis.ReadinessGesture={players,thumbGeometry,association,observations,Hold,inLane,distance};
+  globalThis.ReadinessGesture={players,thumbGeometry,association,observations,Hold,inLane,distance,raised,upperChest};
 })();

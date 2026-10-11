@@ -11,15 +11,16 @@ let faceModel, faceBuffer, faceContext, faceStamp = 0, faceLoading = false;
 const poseAttemptAt = [], poseDetected = [], previousFaces = [];
 let gestureModel, gestureBytes, gestureFetch, gestureCanvas, gestureContext;
 let gestureState='idle', gestureGeneration=0, gestureSampleAt=-Infinity;
+let gestureHands=[];
 let readinessEnabled=false, readinessPreload=false, readinessEpoch=0, readinessHold, readinessResults=null;
 
 function resetReadiness() {
   readinessHold = new ReadinessGesture.Hold(lanes);
   readinessHold.reset(readinessEpoch);
-  readinessResults = null; gestureSampleAt = -Infinity;
+  readinessResults = null; gestureSampleAt = -Infinity;gestureHands=[];
 }
 function gestureFailure(message) {
-  gestureState = 'unavailable'; resetReadiness();
+  gestureState = 'unavailable'; gestureHands=[];gestureSampleAt=-Infinity;
   self.postMessage({ type:'gestureUnavailable', message, readinessEpoch });
 }
 async function loadGesture(retry = false) {
@@ -45,7 +46,7 @@ async function loadGesture(retry = false) {
     const task = vision.GestureRecognizer.createFromOptions(files, {
       baseOptions:{modelAssetBuffer:gestureBytes.slice(),delegate:'CPU'},
       runningMode:'IMAGE',numHands:2,
-      minHandDetectionConfidence:.55,minHandPresenceConfidence:.55,minTrackingConfidence:.5,
+      minHandDetectionConfidence:.45,minHandPresenceConfidence:.45,minTrackingConfidence:.5,
       cannedGesturesClassifierOptions:{maxResults:1,scoreThreshold:0}
     });
     try {
@@ -55,8 +56,8 @@ async function loadGesture(retry = false) {
       task.then(model=>{try{model.close();}catch(_){}}).catch(()=>{}); throw error;
     } finally { clearTimeout(creationTimer); }
     if (generation !== gestureGeneration) { created.close(); return; }
-    gestureModel = created; gestureState = 'ready'; resetReadiness();
-    self.postMessage({ type:'gestureReady', readinessEpoch, model:'Thumb_Up', confidence:.8, holdMs:1200 });
+    gestureModel = created; gestureState = 'ready';gestureHands=[];gestureSampleAt=-Infinity;
+    self.postMessage({ type:'gestureReady', readinessEpoch, model:'One_Hand_Raised', confidence:.45, holdMs:900 });
   } catch(error) {
     if (generation === gestureGeneration) gestureFailure(error.name === 'AbortError' ? 'Hand gesture model download timed out. Retry when your connection is ready.' : error.message);
   } finally { clearTimeout(timer); if (gestureFetch === controller) gestureFetch = null; }
@@ -83,7 +84,7 @@ function readinessCrop(bitmap, ref) {
   return {x,y,width,height};
 }
 function detectReadiness(bitmap,data,refs) {
-  if (!readinessEnabled || !gestureModel || gestureState !== 'ready') return {results:null,ms:0};
+  if (!readinessEnabled) return {results:null,ms:0};
   const time=Number(data.time),aspect=bitmap.width/bitmap.height;
   const frameAge=Number.isFinite(data.captureEpoch)?Date.now()-data.captureEpoch:0;
   if (!Number.isFinite(time) || frameAge>650 || frameAge < -100) {
@@ -99,9 +100,9 @@ function detectReadiness(bitmap,data,refs) {
       if(readinessResults)readinessResults[i]={thumbsUp:false,ready:false,progress:0,heldMs:0,score:0,reason:ref.reason,capturedAt:time,sampledAt:time};
     }
   }
-  if(time-gestureSampleAt<220)return{results:readinessResults,ms:0};
-  const start=performance.now(),hands=[];
-  for(const ref of refs) {
+  const scan=!!gestureModel&&gestureState==='ready'&&time-gestureSampleAt>=220;
+  const start=performance.now(),hands=scan?[]:time-gestureSampleAt<=250?gestureHands:[];
+  if(scan)for(const ref of refs) {
     if(!ref.seen||!ref.distinct)continue;
     const crop=readinessCrop(bitmap,ref),scale=Math.min(1,480/crop.height,640/crop.width);
     const width=Math.max(2,Math.round(crop.width*scale)),height=Math.max(2,Math.round(crop.height*scale));
@@ -116,9 +117,11 @@ function detectReadiness(bitmap,data,refs) {
       hands.push({lane:ref.lane,label:category?.categoryName,score:category?.score,landmarks,worldLandmarks:result.worldLandmarks?.[i]});
     }
   }
-  gestureSampleAt=time;
-  readinessResults=readinessHold.update(ReadinessGesture.observations(hands,refs,aspect),refs,time,readinessEpoch,aspect);
-  return{results:readinessResults,ms:performance.now()-start};
+  if(scan){gestureSampleAt=time;gestureHands=hands;}
+  const values=ReadinessGesture.observations(hands,refs,aspect);
+  if(!scan)for(const value of values)if(value.inputMethod==='hand-landmarks'){value.cached=true;value.sampledAt=gestureSampleAt;}
+  readinessResults=readinessHold.update(values,refs,time,readinessEpoch,aspect);
+  return{results:readinessResults,ms:scan?performance.now()-start:0};
 }
 
 function chooseDelegate(requested) {

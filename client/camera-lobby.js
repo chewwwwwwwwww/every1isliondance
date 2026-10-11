@@ -36,7 +36,7 @@ function observeLobby(data,time,now=performance.now()){
 }
 function gestureAccepted(entry,now){
  const at=entry?.sampledAt;
- return !!entry?.ready&&entry.thumbsUp===true&&entry.score>=.8&&entry.samples>=4&&entry.heldMs>=(S.startGesture==='hands'?1600:1200)
+ return !!entry?.ready&&entry.thumbsUp===true&&entry.score>=(S.startGesture==='hand'?.45:.8)&&entry.samples>=(S.startGesture==='hand'?3:4)&&entry.heldMs>=(S.startGesture==='hands'?1600:S.startGesture==='hand'?900:1200)
   &&Number.isFinite(at)&&at>=S.gestureEnabledAt&&at<=now+50&&now-at<=650;
 }
 function tickLobby(now=performance.now()){
@@ -46,11 +46,11 @@ function tickLobby(now=performance.now()){
  if(S.phase==='lobbyReady'&&!found){openCameraLobby({reset:false});return;}
  if(S.phase==='lobbyFinding'&&found){
   setReadiness(true,true);
-  phase('lobbyReady','All here.<br>Thumbs up.',S.startGesture==='hands'?'Everyone: lift BOTH hands above your head and hold until your lane says Ready.':'Everyone: hold ONE thumb up beside your face, pointing up with your fingers folded, until your lane says Ready.','Only when every player is ready will the 3… 2… 1… countdown begin.');
+  phase('lobbyReady','All here.<br>Hand up.',S.startGesture==='hands'?'Everyone: lift BOTH hands above your head and hold until your lane says Ready.':'Everyone: lift ONE hand beside your face or upper chest and hold until your lane says Ready. A thumbs-up is welcome; fingers do not need to be visible.','Only when every player is ready will the 3… 2… 1… countdown begin.');
   $('stageLabel').textContent=`Camera lobby · all ${S.count} ${S.count===1?'player':'players'} found`;
  }
  if(S.phase==='lobbyReady'&&found&&allVisible()&&!S.paused&&!S.workerRecovering
-  &&(S.startGesture==='hands'||S.gestureStatus==='ready')&&S.readyData?.length===S.count&&S.readyData.every(e=>gestureAccepted(e,now))){
+  &&(S.startGesture==='hands'||S.startGesture==='hand'||S.gestureStatus==='ready')&&S.readyData?.length===S.count&&S.readyData.every(e=>gestureAccepted(e,now))){
   S.players.forEach(p=>{p.base={...p.raw};p.samples=[];});
   S.launchPending=true;setReadiness(false,true);roundReady();
  }
@@ -60,27 +60,27 @@ function updateLobbyUI(){
  for(const el of [$('liveArtwork').closest('.live-artwork'),$('meter'),$('roundLabel').parentElement,$('players')])el.hidden=lobby;
  $('pauseBtn').hidden=lobby;$('fullscreenPauseBtn').disabled=lobby;$('sealGuide').hidden=lobby||S.phase!=='drawing';
  if(!lobby)return;
- const ready=S.phase==='lobbyReady',hands=S.startGesture==='hands',unavailable=S.gestureStatus==='unavailable'&&!hands;
- const title=!ready?'1 · Find your numbered lane':unavailable?'Thumb detector needs a retry':hands?'2 · Both hands up together':'2 · Thumbs up together';
- const help=!ready?'Face the camera. One person per lane. We wait for everyone.':unavailable?'The dance stays here. Retry thumbs-up, or ask the host to select the two-hands gesture.':hands?'Lift BOTH hands above your head. Hold until every lane says Ready.':'Hold ONE thumb up beside your face, fingers folded. Keep it up until every lane says Ready.';
+ const ready=S.phase==='lobbyReady',hands=S.startGesture==='hands',hand=S.startGesture==='hand',unavailable=S.gestureStatus==='unavailable'&&!hands&&!hand;
+ const title=!ready?'1 · Find your numbered lane':unavailable?'Thumb detector needs a retry':hands?'2 · Both hands up together':'2 · One hand up together';
+ const help=!ready?'Face the camera. One person per lane. We wait for everyone.':unavailable?'The dance stays here. Retry thumbs-up, or ask the host to select the two-hands gesture.':hands?'Lift BOTH hands above your head. Hold until every lane says Ready.':'Lift ONE hand beside your face or upper chest. A thumbs-up works too. Hold until every lane says Ready.';
  $('lobbyStageTitle').textContent=title;$('lobbyStageHelp').textContent=help;
  $('lobbyStep1').classList.toggle('current',!ready);$('lobbyStep1').classList.toggle('done',ready);$('lobbyStep2').classList.toggle('current',ready);
- $('lobbyGestureName').textContent=hands?'Both hands above your head':'One thumb up beside your face';
- $('lobbyGestureCopy').textContent=ready?(hands?'Hold both hands high for about 2 seconds.':'Point your thumb up, fold the other fingers, and hold for about 1.2 seconds.'):'Wait until every player is found. Then everyone gives the readiness gesture.';
- $('thumbIllustration').toggleAttribute('hidden',hands);$('handsIllustration').toggleAttribute('hidden',!hands);
- $('gestureRetryBtn').hidden=!unavailable;$('gestureFallbackBtn').hidden=!unavailable;
+ $('lobbyGestureName').textContent=hands?'Both hands above your head':'One hand beside your face';
+ $('lobbyGestureCopy').textContent=ready?(hands?'Hold both hands high for about 2 seconds.':'Lift a hand beside your face or upper chest for about 1 second. You can give a thumbs-up; fingers do not need to be visible.'):'Wait until every player is found. Then everyone gives the readiness gesture.';
+ $('thumbIllustration').toggleAttribute('hidden',hands||hand);$('oneHandIllustration').toggleAttribute('hidden',hands||!hand);$('handsIllustration').toggleAttribute('hidden',!hands);
+ $('gestureRetryBtn').hidden=!(unavailable||hand&&S.gestureStatus==='unavailable');$('gestureFallbackBtn').hidden=!ready||hands;
  const entries=S.lobby?.entries||[];
  const cards=entries.map((e,i)=>{
   const observation=S.readyData?.[i],fresh=Number.isFinite(observation?.sampledAt)&&performance.now()-observation.sampledAt<=650;
   const accepted=ready&&gestureAccepted(observation,performance.now()),progress=ready?(fresh?observation.progress||0:0):e.progress||0;
-  const status=!e.seen?'Find your lane':!e.found?'Recognizing…':accepted?'Ready ✓':ready?unavailable?'Waiting for detector':S.gestureStatus!=='ready'&&!hands?'Loading thumbs-up…':fresh&&observation.thumbsUp?'Keep holding…':hands?'Lift both hands':'Show one thumb up':'Player found ✓';
+  const status=!e.seen?'Find your lane':!e.found?'Recognizing…':accepted?'Ready ✓':ready?unavailable?'Waiting for detector':S.gestureStatus!=='ready'&&!hands&&!hand?'Loading gesture detector…':fresh&&observation.thumbsUp?'Keep holding…':hands?'Lift both hands':'Lift one hand':'Player found ✓';
   const pos=S.count===1?'Your space':i===0?'Left lane':i===S.count-1?'Right lane':'Middle lane';
   return `<div class="lobby-player ${e.found?'found':''} ${accepted?'ready':''}" data-player="${i}" style="--hold:${Math.round(Math.min(1,progress)*100)}%"><span class="lobby-number" aria-hidden="true">${accepted?'✓':String(i+1).padStart(2,'0')}</span><div><strong>Player ${String(i+1).padStart(2,'0')} · ${pos}</strong><span>${status}</span></div><div class="lobby-hold" role="progressbar" aria-label="Player ${i+1} ${ready?'readiness':'recognition'}" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.round(Math.min(1,progress)*100)}"><i></i></div></div>`;
  }).join('');
  if(S.lobbyHtml!==cards){S.lobbyHtml=cards;$('lobbyPlayers').innerHTML=cards;$('lobbyStagePlayers').innerHTML=cards;}
  $('lobbyStagePlayers').style.gridTemplateColumns=`repeat(${S.count},minmax(0,1fr))`;
  $('lobbyFoundCount').textContent=`${entries.filter(e=>e.found).length} of ${S.count} players found`;
- $('lobbyModelStatus').textContent=unavailable?'Thumbs-up is unavailable. Retry or select the host fallback.':hands?'Host selected the two-hands readiness gesture.':S.gestureStatus==='ready'?'One hand is enough. Everyone must be ready together.':'Preparing the thumbs-up detector…';
+ $('lobbyModelStatus').textContent=unavailable?'Thumbs-up is unavailable. Retry or select the host fallback.':hands?'Host selected the two-hands readiness gesture.':hand?'One hand is enough. No finger check. Everyone must be ready together.':S.gestureStatus==='ready'?'One hand is enough. Everyone must be ready together.':'Preparing the hand detector…';
 }
-function retryReadiness(){if(!inCameraLobby())return;S.startGesture='thumb';S.gestureStatus='loading';setReadiness(S.phase==='lobbyReady',true,true);updateUI();}
-function chooseReadinessFallback(){if(!inCameraLobby()||S.gestureStatus!=='unavailable')return;S.startGesture='hands';openCameraLobby();}
+function retryReadiness(){if(!inCameraLobby())return;S.startGesture='hand';S.gestureStatus='loading';setReadiness(S.phase==='lobbyReady',true,true);updateUI();}
+function chooseReadinessFallback(){if(!inCameraLobby()||S.phase!=='lobbyReady')return;S.startGesture='hands';openCameraLobby();}
