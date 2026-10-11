@@ -504,12 +504,13 @@
       return this._enqueue(async token => {
         if (this._sessionError) {
           this._cleanupSession();
+          await this._suspendAudio();
           this._status('warning', { warning: 'A drawing section did not finish recording. Save the poster or record again for a complete video.' });
           return null;
         }
         try {
           this._finishing = true;
-          if (!await this._beginRound(token)) { this._cleanupSession(); return null; }
+          if (!await this._beginRound(token)) { this._cleanupSession(); await this._suspendAudio(); return null; }
           this._status('finishing');
           const now = this._audio?.currentTime;
           if (now !== undefined) {
@@ -520,7 +521,7 @@
           await this._delay(2000);
           if (!this._valid(token)) return null;
           if (!await this._endRound(token)) {
-            if (this._valid(token)) this._cleanupSession();
+            if (this._valid(token)) { this._cleanupSession(); await this._suspendAudio(); }
             return null;
           }
           if (!this._valid(token)) return null;
@@ -547,6 +548,7 @@
           return { blob, mime, duration };
         } catch (e) {
           this._cleanupSession();
+          await this._suspendAudio();
           if (this._valid(token)) this._status('warning', { warning: `Clip could not be saved: ${e.message} You can still save the poster.` });
           return null;
         }
