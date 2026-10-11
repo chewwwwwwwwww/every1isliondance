@@ -5,6 +5,7 @@ import {Script,runInNewContext} from 'node:vm';
 const root=fileURLToPath(new URL('..',import.meta.url));
 const read=p=>readFile(resolve(root,p),'utf8');
 let html=await read('client/index.html');
+html=html.replace('/* MOBILE */',await read('client/mobile.css'));
 const assets={},assetSets=[];
 const faviconLinks=[];
 for(const [name,size,url,rel]of [['lion-favicon-16.png',16,'/favicon-16.png','icon'],['lion-favicon-32.png',32,'/favicon-32.png','icon'],['lion-favicon-180.png',180,'/apple-touch-icon.png','apple-touch-icon']]){
@@ -33,7 +34,7 @@ const blessings=libraryContext.window.BlessingLibrary;
 const recipeChoices=Object.fromEntries(blessings.choices.map(c=>[c.id,{text:c.text,charCount:c.chars.length,itemCount:c.kind==='phrase'?c.chars.length:blessings.glyphs[c.chars[0]].groups.length}]));
 const base=`${await read('client/base.js')}\n${library}`,filter=`window.LION_ASSETS=${JSON.stringify(assetUrls)};\n${await read('client/lion-filter.js')}`,media=await read('client/media.js'),pose=`${await read('client/readiness-gesture.js')}\n${await read('client/pose-worker.js')}`;
 new Script(pose);
-let app=`${await read('client/cursor-smoothing.js')}\n${await read('client/player-lobby.js')}\n${await read('client/camera-lobby.js')}\n${(await read('client/app.js')).replace('"__POSE_WORKER__"',JSON.stringify(pose))}`;
+let app=`${await read('client/cursor-smoothing.js')}\n${await read('client/player-lobby.js')}\n${await read('client/camera-lobby.js')}\n${await read('client/stage-fullscreen.js')}\n${(await read('client/app.js')).replace('"__POSE_WORKER__"',JSON.stringify(pose))}`;
 for(const [marker,source]of [['BASE',base],['FILTER',filter],['MEDIA',media],['APP',app]])html=html.replace(`/* ${marker} */`,source.replaceAll('</script','<\\/script'));
 for(const script of html.matchAll(/<script>([\s\S]*?)<\/script>/g))new Script(script[1]);
 const audio=(await readFile(resolve(root,'soundtrack.mp3'))).toString('base64');

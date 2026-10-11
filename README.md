@@ -6,7 +6,7 @@ Lion Dance Motion Ink is a webcam experience for one, two, or three people drawi
 
 [Open on Vercel](https://every1isliondance.vercel.app) · [Original Site and keepsake backend](https://lion-dance-motion-ink.activepearl4.chatgpt.site)
 
-**Edition 06 / v2.6.1:** camera startup has a two-step lobby. The chosen number of distinct players must remain visible in clearly numbered lanes, then every player lifts one hand beside their face or upper chest to start the first countdown. A thumbs-up is welcome; finger shape is not checked. Faces alone never start a game. A newly generated cute southern-lion favicon matches the crimson, ivory and gold palette. The red-stage results, automatic highlight/timelapse and QR keepsakes from Edition 05 remain. This edition updates the Vercel frontend; the existing Worker/R2 keepsake backend remains unchanged.
+**Edition 07 / v2.7.0:** the live stage adapts to portrait and landscape phones while preserving the entire camera frame. Landscape places touch controls beside the camera; portrait uses a taller stage. The growing blessing stays visible in the stage. Fullscreen uses the native stage API when available and a viewport-filling stage fallback when unavailable or rejected. Starting on a phone brings the camera into view, and rotation preserves existing marks while tracking reacquires a changed camera orientation. The numbered lanes, all-player raised-hand readiness, actual-stroke red packets, highlights, timelapse and QR keepsakes remain.
 
 **Before starting:** Automatically make a QR keepsake at the end is checked by default. It uploads the finished poster and available videos to a public, unlisted link. Turn it off before starting to keep the media on this device. Camera processing stays local, and no microphone is recorded.
 
@@ -21,7 +21,7 @@ npm run build
 npm run preview
 ```
 
-Open **http://localhost:4173** in current Chrome or Edge. Review the automatic QR option, allow camera access and stand in your numbered lane. Wait for every player to be found, then lift one hand beside your face or upper chest for about one second. A thumbs-up works without visible fingers. All players must be ready together; you can lower your hand once the countdown begins. The first startup downloads MediaPipe JavaScript, WASM, and tracking models from CDNs. Timelapse conversion loads Mediabunny 1.61.3 from a pinned CDN. Warm the browser cache before an event; internet is still needed for uncached dependencies, fonts, and the QR library.
+Open **http://localhost:4173** in current Chrome or Edge. For camera access on another device, use HTTPS; the live Vercel demo is ready for phones. Review the automatic QR option, allow camera access and stand in your numbered lane. Wait for every player to be found, then lift one hand beside your face or upper chest for about one second. A thumbs-up works without visible fingers. All players must be ready together; you can lower your hand once the countdown begins. The first startup downloads MediaPipe JavaScript, WASM, and tracking models from CDNs. Timelapse conversion loads Mediabunny 1.61.3 from a pinned CDN. Warm the browser cache before an event; internet is still needed for uncached dependencies, fonts, and the QR library.
 
 The local server runs the real compiled Worker with an **in-memory R2-compatible bucket**. Poster/video uploads, keepsake pages, byte-range video playback, and deletion work locally. Stored keepsakes disappear when the preview process stops. Localhost QR links open only on the same device; use the live demo for links that attendees can open on their phones.
 
@@ -55,7 +55,8 @@ The production frontend `https://every1isliondance.vercel.app` is registered wit
 - The timer finishes a dancer's mark after meaningful movement. Someone who has not moved gets another five seconds. Raise **both hands above your head for about one second** to finish early, or use the optional Seal button. Standing still does not finish a mark.
 - Pause and tracking loss preserve round time and pause recording. Close-up tracking uses the measured face; a wider view supports body movement. The cursor stays in the mirrored camera's coordinate space, with gentle smoothing and no movement amplification.
 - Photoreal costume textures follow measured body landmarks. Close-up views show headgear above the forehead; clothing appears only when the torso is reliably measured. The face remains visible.
-- Fullscreen shows the red stage and camera with compact **Pause**, **Start over**, and **Exit fullscreen** controls. The results remain inside that stage, so fullscreen stays open through playback, downloads and the QR. Press **Esc** or use Exit fullscreen to restore the full interface.
+- **Phone play:** portrait and landscape preserve the full camera frame without stretching it. Prop the phone up so hands are free; landscape is recommended for two or three dancers. Numbered lanes, the countdown and a growing artwork preview stay visible beside or above/below the camera. Rotation does not redraw existing marks. If the camera changes its intrinsic orientation, tracking pauses until fresh observations arrive.
+- **Stage fullscreen:** compact **Sound**, **Pause**, **Start over**, and **Exit** controls remain available. Unsupported or rejected native fullscreen opens the entire stage in a viewport-filling fallback, including camera overlays and results. Browser bars may remain in fallback mode. Results scroll inside the stage, with Exit available through playback, downloads and the QR. Press **Esc** or use Exit to restore the full interface and previous page position.
 - The red packet contains **the participants' actual strokes**. Paths are positioned and uniformly scaled into the blessing while preserving their curves, proportions, and pen lifts.
 
 ### Drawing time adapts to each part
@@ -89,7 +90,9 @@ Camera frames and landmark processing stay in the browser. No microphone is reco
 | File or directory | Purpose |
 | --- | --- |
 | `client/index.html` | Responsive page, styles, and script insertion points |
-| `client/app.js` | Session flow, adaptive timing, simultaneous lanes, ink, poster, and sharing UI |
+| `client/app.js` | Session flow, adaptive camera geometry, timing, simultaneous lanes, ink, poster, and sharing UI |
+| `client/mobile.css` | Portrait/landscape stages, touch controls, safe areas and compact progress dock |
+| `client/stage-fullscreen.js` | Native stage fullscreen and viewport fallback with scroll/focus restoration |
 | `client/pose-worker.js` | MediaPipe pose, optional face tracking and lobby-only gesture inference in a Worker |
 | `client/player-lobby.js` | Pure distinct-player, lane ownership and observation freshness controller |
 | `client/camera-lobby.js` | Two-step camera startup, all-player gesture gate, UI and explicit failure fallback |
@@ -129,6 +132,6 @@ The soundtrack excerpt was supplied by the project creator. This repository pres
 
 See [`THIRD_PARTY.md`](THIRD_PARTY.md) for dependency and media provenance.
 
-Edition 06 adds startup gating beyond Edition 05 and published Sites version 7. This edition targets Vercel only; the existing Sites Worker/R2 backend remains in use. Browser and model checks distinguish synthetic startup fixtures from physical participant rehearsal.
+Edition 07 adds phone layouts and a stage fullscreen fallback to the existing startup gate. This edition targets Vercel only; the existing Worker/R2 backend remains in use. Browser checks use synthetic camera fixtures and distinguish them from physical phone and participant rehearsal. Physical iPhone/Safari camera behavior still needs confirmation on the device.
 
 Made for Common Ground. A playful contemporary interpretation of southern lion dance and the joy of making together.

@@ -63,7 +63,9 @@ function updateLobbyUI(){
  const ready=S.phase==='lobbyReady',hands=S.startGesture==='hands',hand=S.startGesture==='hand',unavailable=S.gestureStatus==='unavailable'&&!hands&&!hand;
  const title=!ready?'1 · Find your numbered lane':unavailable?'Thumb detector needs a retry':hands?'2 · Both hands up together':'2 · One hand up together';
  const help=!ready?'Face the camera. One person per lane. We wait for everyone.':unavailable?'The dance stays here. Retry thumbs-up, or ask the host to select the two-hands gesture.':hands?'Lift BOTH hands above your head. Hold until every lane says Ready.':'Lift ONE hand beside your face or upper chest. A thumbs-up works too. Hold until every lane says Ready.';
- $('lobbyStageTitle').textContent=title;$('lobbyStageHelp').textContent=help;
+ const compact=$('stage').classList.contains('phone-landscape');
+ $('lobbyStageTitle').textContent=compact?(!ready?'1 · Find lanes':unavailable?'Retry gesture':hands?'2 · Hands up':'2 · Hand up'):title;
+ $('lobbyStageHelp').textContent=compact?(!ready?'One person per lane.':unavailable?'Retry or use both hands.':hands?'Both hands high. Hold.':'By your face. Hold for Ready.'):help;
  $('lobbyStep1').classList.toggle('current',!ready);$('lobbyStep1').classList.toggle('done',ready);$('lobbyStep2').classList.toggle('current',ready);
  $('lobbyGestureName').textContent=hands?'Both hands above your head':'One hand beside your face';
  $('lobbyGestureCopy').textContent=ready?(hands?'Hold both hands high for about 2 seconds.':'Lift a hand beside your face or upper chest for about 1 second. You can give a thumbs-up; fingers do not need to be visible.'):'Wait until every player is found. Then everyone gives the readiness gesture.';
