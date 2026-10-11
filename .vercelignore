@@ -1,0 +1,12 @@
+.git
+.vercel
+node_modules
+dist
+public
+worker/index.js
+/index.html
+client/assets/*.png
+work
+.env*
+*.log
+.DS_Store

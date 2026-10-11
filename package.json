@@ -1,0 +1,15 @@
+{
+  "name": "every1isliondance",
+  "version": "2.4.0",
+  "description": "Draw Chinese blessings together with your body, lion-dance costumes, and shareable red packets and highlights.",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "node scripts/build-v2.mjs",
+    "build:vercel": "node scripts/build-vercel.mjs",
+    "preview": "node scripts/preview.mjs"
+  }
+}

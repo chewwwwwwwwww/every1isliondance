@@ -1,0 +1,15 @@
+{
+  "framework": null,
+  "buildCommand": "npm run build:vercel",
+  "outputDirectory": "public",
+  "rewrites": [
+    {
+      "source": "/api/:path*",
+      "destination": "https://lion-dance-motion-ink.activepearl4.chatgpt.site/api/:path*"
+    },
+    {
+      "source": "/media/:path*",
+      "destination": "https://lion-dance-motion-ink.activepearl4.chatgpt.site/media/:path*"
+    }
+  ]
+}

@@ -1,0 +1,18 @@
+node_modules/
+.wrangler/
+.env*
+.DS_Store
+*.log
+.cache/
+coverage/
+playwright-report/
+test-results/
+work/
+dist/
+public/
+.vercel/
+worker/index.js
+
+# Build artifacts are regenerated with npm run build.
+# Root index.html is an intentionally included self-embedded standalone demo.
+# Keep credentials and local participant/test recordings outside the repository.
